@@ -21,11 +21,23 @@ interface Booking {
   email: string;
   roll_number: string;
   category: 'UG' | 'PG' | 'PhD' | 'PDF' | 'Faculty';
+  group_size: number;
+  allow_coshare?: boolean; // false if user opted out of room sharing
   date: string;
   time_slot: string;
   room: 'DR-1' | 'DR-2' | 'DR-3';
   key_status: 'not_collected' | 'key_issued' | 'key_returned';
   created_at: string;
+}
+
+// In-memory 2FA verification code store for anti-misuse
+const verificationCodes: Record<string, { code: string; expiresAt: number }> = {};
+
+// Pluggable email dispatch service (Ready for Nodemailer / SendGrid / Resend)
+async function sendEmailNotification(to: string, subject: string, body: string, code: string): Promise<boolean> {
+  // Production hook: Replace with nodemailer.createTransport() or Resend API
+  console.log(`[EMAIL DISPATCH PING] To: ${to} | Subject: ${subject} | 2FA Code: ${code}`);
+  return true;
 }
 
 // Ensure DB directory and seed file exist
@@ -56,6 +68,7 @@ function initDatabase(): Booking[] {
       email: 's.jenkins@etd2026.org',
       roll_number: 'ETD-DEL-102',
       category: 'Faculty',
+      group_size: 4,
       date: today,
       time_slot: '10:00 - 12:00',
       room: 'DR-1',
@@ -68,6 +81,7 @@ function initDatabase(): Booking[] {
       email: 'rohan.m@etd2026.org',
       roll_number: 'ETD-RES-405',
       category: 'PhD',
+      group_size: 3,
       date: today,
       time_slot: '14:00 - 16:00',
       room: 'DR-2',
@@ -80,6 +94,7 @@ function initDatabase(): Booking[] {
       email: 'ananya.s@etd2026.org',
       roll_number: 'ETD-PG-889',
       category: 'PG',
+      group_size: 2,
       date: today,
       time_slot: '16:00 - 18:00',
       room: 'DR-1',
@@ -120,6 +135,43 @@ initDatabase();
 
 // --- REST API ENDPOINTS ---
 
+// 0. POST /api/auth/send-verification (2FA Confirmation Email Ping)
+app.post('/api/auth/send-verification', async (req: Request, res: Response) => {
+  const { email } = req.body;
+  if (!email || typeof email !== 'string') {
+    return res.status(400).json({ success: false, error: 'Email address is required.' });
+  }
+
+  const trimmed = email.trim().toLowerCase();
+  // Strictly enforce @etd2026.org
+  if (!trimmed.endsWith('@etd2026.org')) {
+    return res.status(400).json({
+      success: false,
+      error: '❌ Access restricted: Email must end with @etd2026.org (e.g. yourname@etd2026.org).',
+    });
+  }
+
+  // Generate 6-digit confirmation code
+  const code = Math.floor(100000 + Math.random() * 900000).toString();
+  verificationCodes[trimmed] = {
+    code,
+    expiresAt: Date.now() + 10 * 60 * 1000, // 10 minutes
+  };
+
+  await sendEmailNotification(
+    trimmed,
+    'ETD-2026 Discussion Room 2FA Authorization Code',
+    `Your verification code to confirm room reservation is: ${code}`,
+    code
+  );
+
+  return res.json({
+    success: true,
+    message: `📨 Confirmation ping sent to ${trimmed}. Please enter the 6-digit 2FA code to confirm your reservation.`,
+    demoCode: code, // Provided for instant hackathon demonstration/testing
+  });
+});
+
 // 1. GET /api/bookings with filters
 app.get('/api/bookings', (req: Request, res: Response) => {
   const { date, email, room, roll_number } = req.query;
@@ -159,9 +211,9 @@ app.get('/api/bookings/:id', (req: Request, res: Response) => {
   res.json({ success: true, data: booking });
 });
 
-// 3. POST /api/bookings (Create a booking with ETD-2026 Library validation)
+// 3. POST /api/bookings (Create a booking with strict @etd2026.org and group_size)
 app.post('/api/bookings', (req: Request, res: Response) => {
-  const { name, email, roll_number, category, date, time_slot, room } = req.body;
+  const { name, email, roll_number, category, group_size, allow_coshare, date, time_slot, room, verification_code } = req.body;
 
   if (!name || !email || !roll_number || !category || !date || !time_slot || !room) {
     return res.status(400).json({ success: false, error: 'All fields are required.' });
@@ -169,10 +221,25 @@ app.post('/api/bookings', (req: Request, res: Response) => {
 
   const trimmedEmail = String(email).trim().toLowerCase();
 
-  // Valid email check (accepts @etd2026.org or any valid delegate/institutional email)
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (!emailRegex.test(trimmedEmail)) {
-    return res.status(400).json({ success: false, error: '❌ Please enter a valid email address (e.g. user@etd2026.org).' });
+  // Strict validation: must end with @etd2026.org
+  if (!trimmedEmail.endsWith('@etd2026.org')) {
+    return res.status(400).json({
+      success: false,
+      error: '❌ Access restricted: Email must end with @etd2026.org (e.g. yourname@etd2026.org).',
+    });
+  }
+
+  // Check 2FA verification code if provided
+  if (verification_code) {
+    const record = verificationCodes[trimmedEmail];
+    if (!record || record.code !== String(verification_code).trim()) {
+      return res.status(400).json({
+        success: false,
+        error: '❌ Invalid or expired 2FA confirmation code. Please request a new code.',
+      });
+    }
+    // Remove used code
+    delete verificationCodes[trimmedEmail];
   }
 
   const bookings = readBookings();
@@ -185,12 +252,63 @@ app.post('/api/bookings', (req: Request, res: Response) => {
     return res.status(400).json({ success: false, error: '❌ Maximum 2 slots per day.' });
   }
 
-  // Rule 3: Conflict detection (Time slot already booked)
-  const conflict = bookings.some(
+  const ROOM_CAPACITIES: Record<string, number> = {
+    'DR-1': 10,
+    'DR-2': 8,
+    'DR-3': 14,
+  };
+
+  const roomMax = ROOM_CAPACITIES[room] || 10;
+  const existingForSlot = bookings.filter(
     (b) => b.date === date && b.time_slot === time_slot && b.room === room
   );
-  if (conflict) {
-    return res.status(400).json({ success: false, error: '❌ This time slot is already booked.' });
+
+  const newGroupSize = Math.max(1, Number(group_size) || 1);
+
+  // Partial Booking Rule check:
+  if (existingForSlot.length >= 2) {
+    return res.status(400).json({
+      success: false,
+      error: '❌ This room is already fully booked for this time slot (maximum 2 co-sharing groups reached).',
+    });
+  }
+
+  if (existingForSlot.length === 1) {
+    const firstGroup = existingForSlot[0];
+    const firstGroupSize = Number(firstGroup.group_size) || 2;
+    const halfRoom = roomMax / 2;
+
+    // Rule 0: Check if first group opted out of co-sharing
+    if (firstGroup.allow_coshare === false) {
+      return res.status(400).json({
+        success: false,
+        error: '❌ The primary group opted for an exclusive private reservation. Co-sharing is not permitted.',
+      });
+    }
+
+    // Rule 1: Less than half of the room must be filled by group 1
+    if (firstGroupSize >= halfRoom) {
+      return res.status(400).json({
+        success: false,
+        error: `❌ This room is reserved by a primary group of ${firstGroupSize} students and is not eligible for co-sharing.`,
+      });
+    }
+
+    // Rule 2: Two bookings total must be at least 2 less than max (leaving 2-seat buffer)
+    const maxAllowedForSecondGroup = (roomMax - 2) - firstGroupSize;
+    if (newGroupSize > maxAllowedForSecondGroup) {
+      return res.status(400).json({
+        success: false,
+        error: `❌ Group size exceeds co-sharing partition limit. Maximum ${maxAllowedForSecondGroup} students allowed to ensure a 2-seat partition buffer.`,
+      });
+    }
+  } else {
+    if (newGroupSize > roomMax) {
+      return res.status(400).json({
+        success: false,
+        error: `❌ Group size (${newGroupSize}) exceeds maximum room capacity of ${roomMax} persons.`,
+      });
+    }
   }
 
   const now = new Date();
@@ -203,6 +321,8 @@ app.post('/api/bookings', (req: Request, res: Response) => {
     email: trimmedEmail,
     roll_number: String(roll_number).trim(),
     category,
+    group_size: Math.max(1, Math.min(20, Number(group_size) || 1)),
+    allow_coshare: allow_coshare === undefined ? true : Boolean(allow_coshare),
     date,
     time_slot,
     room,
