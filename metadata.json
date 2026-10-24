@@ -1,0 +1,6 @@
+{
+  "name": "IIT Bombay Central Library - Discussion Room Booking System (DRBS)",
+  "description": "Full-stack web application for discussion room reservations at IIT Bombay Central Library, featuring real-time slot matrices, @iitb.ac.in domain validation, security key desk management, digital passes, and admin analytics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
