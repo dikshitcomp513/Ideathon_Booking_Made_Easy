@@ -52,10 +52,10 @@ function initDatabase(): Booking[] {
   const seed: Booking[] = [
     {
       id: 1,
-      name: 'Aarav Sharma',
-      email: 'aarav.sharma@iitb.ac.in',
-      roll_number: '210050012',
-      category: 'UG',
+      name: 'Dr. Sarah Jenkins',
+      email: 's.jenkins@etd2026.org',
+      roll_number: 'ETD-DEL-102',
+      category: 'Faculty',
       date: today,
       time_slot: '10:00 - 12:00',
       room: 'DR-1',
@@ -64,10 +64,10 @@ function initDatabase(): Booking[] {
     },
     {
       id: 2,
-      name: 'Priya Iyer',
-      email: 'priya.iyer@iitb.ac.in',
-      roll_number: '22M034',
-      category: 'PG',
+      name: 'Rohan Mehra',
+      email: 'rohan.m@etd2026.org',
+      roll_number: 'ETD-RES-405',
+      category: 'PhD',
       date: today,
       time_slot: '14:00 - 16:00',
       room: 'DR-2',
@@ -76,10 +76,10 @@ function initDatabase(): Booking[] {
     },
     {
       id: 3,
-      name: 'Dr. Ramesh Patel',
-      email: 'ramesh.patel@iitb.ac.in',
-      roll_number: 'FAC-7412',
-      category: 'Faculty',
+      name: 'Ananya Sharma',
+      email: 'ananya.s@etd2026.org',
+      roll_number: 'ETD-PG-889',
+      category: 'PG',
       date: today,
       time_slot: '16:00 - 18:00',
       room: 'DR-1',
@@ -159,7 +159,7 @@ app.get('/api/bookings/:id', (req: Request, res: Response) => {
   res.json({ success: true, data: booking });
 });
 
-// 3. POST /api/bookings (Create a booking with exact PHP rule parity)
+// 3. POST /api/bookings (Create a booking with ETD-2026 Library validation)
 app.post('/api/bookings', (req: Request, res: Response) => {
   const { name, email, roll_number, category, date, time_slot, room } = req.body;
 
@@ -167,11 +167,12 @@ app.post('/api/bookings', (req: Request, res: Response) => {
     return res.status(400).json({ success: false, error: 'All fields are required.' });
   }
 
-  const trimmedEmail = String(email).trim();
+  const trimmedEmail = String(email).trim().toLowerCase();
 
-  // Rule 1: Email must be @iitb.ac.in
-  if (!trimmedEmail.endsWith('@iitb.ac.in')) {
-    return res.status(400).json({ success: false, error: '❌ Email must be @iitb.ac.in' });
+  // Valid email check (accepts @etd2026.org or any valid delegate/institutional email)
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(trimmedEmail)) {
+    return res.status(400).json({ success: false, error: '❌ Please enter a valid email address (e.g. user@etd2026.org).' });
   }
 
   const bookings = readBookings();

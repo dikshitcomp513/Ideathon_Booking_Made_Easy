@@ -12,18 +12,14 @@ import {
   RefreshCw, 
   AlertTriangle, 
   CheckCircle2, 
-  Info,
-  QrCode,
-  Download,
-  Printer,
-  Key,
-  Users,
-  BarChart3,
-  BookOpen,
-  ArrowRight,
-  Check,
-  Building2,
-  FileText
+  Info, 
+  QrCode, 
+  Printer, 
+  Key, 
+  BarChart3, 
+  Building2, 
+  FileText,
+  Check
 } from 'lucide-react';
 
 interface Booking {
@@ -73,38 +69,29 @@ const TIME_SLOTS = [
 
 const PHP_FILES: Record<string, string> = {
   'index.php': `<?php
+// ETD-2026 Discussion Room Booking System (DRBS)
 $host = "localhost";
 $user = "booking_user";
 $pass = "Book@1234";
 $dbname = "booking_system";
 
 $conn = new mysqli($host, $user, $pass, $dbname);
-if ($conn->connect_error) {
-    die("DB Connection failed: " . $conn->connect_error);
-}
+$date = $_GET['date'] ?? date("Y-m-d");
 
-$date = $_GET['date'] ?? date("Y-m-d"); // Default = today
-
-// Generate 2-hour slots (24 hrs -> 12 slots)
 $slots = [];
 for ($h = 0; $h < 24; $h += 2) {
     $start = str_pad($h, 2, "0", STR_PAD_LEFT) . ":00";
     $end = str_pad($h + 2, 2, "0", STR_PAD_LEFT) . ":00";
     $slots[] = "$start - $end";
 }
-
 $rooms = ["DR-1", "DR-2", "DR-3"];
-// (Renders Guidelines modal + 12-slot booking matrix)
 ?>`,
   'book.php': `<?php
-// Checks @iitb.ac.in email, max 2 slots/day, and duplicate bookings
-if (!preg_match("/@iitb\\.ac\\.in$/", $email)) {
-    die("<h3 style='color:red;'>❌ Email must be @iitb.ac.in</h3>");
-}
-// Max 2 slots per day
+// Validates delegate email, max 2 slots/day, and duplicate reservations
+$email = $_POST['email'];
 $checkSlots = $conn->prepare("SELECT COUNT(*) FROM bookings WHERE email=? AND date=?");
-// Check already booked
 $checkTime = $conn->prepare("SELECT id FROM bookings WHERE date=? AND time_slot=? AND room=?");
+$stmt = $conn->prepare("INSERT INTO bookings (name,email,roll_number,category,date,time_slot,room) VALUES (?,?,?,?,?,?,?)");
 ?>`,
   'admin_login.php': `<?php
 session_start();
@@ -129,32 +116,24 @@ if ($id) {
     $stmt->execute();
 }
 header("Location: admin.php");
-?>`,
-  'availability.php': `<?php
-$sql = "SELECT * FROM bookings WHERE date=? ORDER BY room, time_slot";
-// Prints table of all bookings for the specified date
 ?>`
 };
 
 export default function App() {
   const getTodayStr = () => new Date().toISOString().split('T')[0];
 
-  // Active Navigation Tab
-  // 'booking' | 'my_bookings' | 'security_desk' | 'admin' | 'architecture'
   const [activeTab, setActiveTab] = useState<'booking' | 'my_bookings' | 'security_desk' | 'admin' | 'architecture'>('booking');
-
   const [selectedDate, setSelectedDate] = useState<string>(getTodayStr());
   const [showGuidelines, setShowGuidelines] = useState<boolean>(true);
   const [acceptedGuidelines, setAcceptedGuidelines] = useState<boolean>(false);
   const [selectedPhpFile, setSelectedPhpFile] = useState<string>('index.php');
 
-  // Bookings state synced with backend API
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [stats, setStats] = useState<StatsData | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // Booking Modal / Form
+  // Booking Form State
   const [bookingSlot, setBookingSlot] = useState<{ room: 'DR-1' | 'DR-2' | 'DR-3'; time: string; date: string } | null>(null);
   const [formData, setFormData] = useState({
     name: '',
@@ -164,11 +143,11 @@ export default function App() {
   });
   const [confirmedPass, setConfirmedPass] = useState<Booking | null>(null);
 
-  // Student Search Tab State
+  // Search State
   const [searchRollOrEmail, setSearchRollOrEmail] = useState<string>('');
   const [searchedStudentBookings, setSearchedStudentBookings] = useState<Booking[] | null>(null);
 
-  // Admin Portal State
+  // Admin State
   const [isAdminLoggedIn, setIsAdminLoggedIn] = useState<boolean>(false);
   const [adminUsername, setAdminUsername] = useState<string>('');
   const [adminPassword, setAdminPassword] = useState<string>('');
@@ -177,7 +156,6 @@ export default function App() {
   const [adminFilterDate, setAdminFilterDate] = useState<string>('');
   const [adminFilterRoom, setAdminFilterRoom] = useState<string>('');
 
-  // Fetch all bookings and stats from server
   const loadData = async () => {
     setIsLoading(true);
     try {
@@ -192,7 +170,7 @@ export default function App() {
         setStats(statsJson.data || null);
       }
     } catch (err) {
-      console.warn('Backend fetch failed, falling back to local copy', err);
+      console.warn('Backend fetch failed', err);
     } finally {
       setIsLoading(false);
     }
@@ -207,7 +185,6 @@ export default function App() {
     setTimeout(() => setNotification(null), 4000);
   };
 
-  // Handle slot reservation
   const handleStartBooking = (room: 'DR-1' | 'DR-2' | 'DR-3', time: string) => {
     setBookingSlot({ room, time, date: selectedDate });
     setFormData({ name: '', email: '', roll_number: '', category: '' });
@@ -219,8 +196,9 @@ export default function App() {
     if (!bookingSlot) return;
 
     const email = formData.email.trim();
-    if (!email.endsWith('@iitb.ac.in')) {
-      showToast('error', '❌ Email must be @iitb.ac.in');
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      showToast('error', '❌ Please enter a valid email address.');
       return;
     }
 
@@ -248,12 +226,11 @@ export default function App() {
       showToast('success', json.message || 'Booking confirmed!');
       setConfirmedPass(json.data);
       loadData();
-    } catch (err) {
+    } catch {
       showToast('error', 'Network error connecting to booking API.');
     }
   };
 
-  // Admin login
   const handleAdminLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -274,13 +251,12 @@ export default function App() {
     }
   };
 
-  // Delete booking (Admin)
   const handleDeleteBooking = async (id: number) => {
-    if (!confirm(`Are you sure you want to delete and cancel booking #${id}?`)) return;
+    if (!confirm(`Are you sure you want to cancel booking #${id}?`)) return;
     try {
       const res = await fetch(`/api/bookings/${id}`, { method: 'DELETE' });
       if (res.ok) {
-        showToast('success', `Booking #${id} deleted.`);
+        showToast('success', `Booking #${id} cancelled.`);
         loadData();
       } else {
         showToast('error', 'Failed to delete booking.');
@@ -290,7 +266,6 @@ export default function App() {
     }
   };
 
-  // Update Key Status (Security Desk)
   const handleUpdateKeyStatus = async (id: number, newStatus: 'not_collected' | 'key_issued' | 'key_returned') => {
     try {
       const res = await fetch(`/api/bookings/${id}/key-status`, {
@@ -307,7 +282,6 @@ export default function App() {
     }
   };
 
-  // Search bookings for a student
   const handleSearchStudent = (e: React.FormEvent) => {
     e.preventDefault();
     const query = searchRollOrEmail.trim().toLowerCase();
@@ -321,16 +295,14 @@ export default function App() {
     setSearchedStudentBookings(found);
   };
 
-  // Demo reset
   const handleResetDemo = async () => {
-    if (confirm('Reset database to clean initial state for hackathon demo?')) {
+    if (confirm('Reset database to clean initial state for ETD-2026?')) {
       await fetch('/api/reset-demo', { method: 'POST' });
       await loadData();
       showToast('success', 'Database reset to demo state.');
     }
   };
 
-  // Admin filtered table
   const adminFiltered = bookings.filter((b) => {
     if (adminFilterEmail && !b.email.toLowerCase().includes(adminFilterEmail.toLowerCase())) return false;
     if (adminFilterDate && b.date !== adminFilterDate) return false;
@@ -342,7 +314,7 @@ export default function App() {
     <div className="min-h-screen bg-[#f5f8fa] text-slate-800 flex flex-col font-sans">
       {/* Toast Notification */}
       {notification && (
-        <div className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-lg shadow-xl text-sm font-semibold flex items-center gap-2 border transition-all animate-bounce ${
+        <div className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-lg shadow-xl text-sm font-semibold flex items-center gap-2 border transition-all ${
           notification.type === 'success' 
             ? 'bg-emerald-600 text-white border-emerald-700' 
             : 'bg-rose-600 text-white border-rose-700'
@@ -352,25 +324,25 @@ export default function App() {
         </div>
       )}
 
-      {/* Top Hackathon Ribbon & View Switcher */}
-      <nav className="bg-[#002855] text-white px-4 py-2.5 text-xs flex flex-wrap items-center justify-between border-b border-sky-950 shadow-md z-30">
+      {/* Top Ribbon & Tab Bar */}
+      <nav className="bg-[#0b1c34] text-white px-4 py-2.5 text-xs flex flex-wrap items-center justify-between border-b border-slate-700 shadow-md z-30">
         <div className="flex items-center gap-2.5">
           <div className="flex items-center gap-1.5 font-bold tracking-wide text-sky-300">
             <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
-            IITB Central Library • DRBS Portal
+            ETD-2026 Library • DRBS
           </div>
           <span className="text-slate-400">|</span>
-          <span className="text-emerald-300 font-mono text-[11px] bg-sky-950/80 px-2 py-0.5 rounded border border-sky-800">
-            Full-Stack Node.js + Express API
+          <span className="text-emerald-300 font-mono text-[11px] bg-slate-900/80 px-2 py-0.5 rounded border border-slate-700">
+            Discussion Room System
           </span>
         </div>
 
-        {/* Tab Navigation */}
+        {/* Tab Buttons */}
         <div className="flex items-center gap-1.5 flex-wrap my-1">
           <button
             onClick={() => setActiveTab('booking')}
-            className={`px-3 py-1.5 rounded-md font-medium transition flex items-center gap-1.5 ${
-              activeTab === 'booking' ? 'bg-[#0077cc] text-white shadow-xs' : 'bg-slate-800/80 text-slate-300 hover:bg-slate-700'
+            className={`px-3 py-1.5 rounded-md font-medium transition flex items-center gap-1.5 cursor-pointer ${
+              activeTab === 'booking' ? 'bg-[#0077cc] text-white shadow-xs' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
             }`}
           >
             <Calendar size={13} />
@@ -379,8 +351,8 @@ export default function App() {
 
           <button
             onClick={() => setActiveTab('my_bookings')}
-            className={`px-3 py-1.5 rounded-md font-medium transition flex items-center gap-1.5 ${
-              activeTab === 'my_bookings' ? 'bg-[#0077cc] text-white shadow-xs' : 'bg-slate-800/80 text-slate-300 hover:bg-slate-700'
+            className={`px-3 py-1.5 rounded-md font-medium transition flex items-center gap-1.5 cursor-pointer ${
+              activeTab === 'my_bookings' ? 'bg-[#0077cc] text-white shadow-xs' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
             }`}
           >
             <QrCode size={13} />
@@ -389,18 +361,18 @@ export default function App() {
 
           <button
             onClick={() => setActiveTab('security_desk')}
-            className={`px-3 py-1.5 rounded-md font-medium transition flex items-center gap-1.5 ${
-              activeTab === 'security_desk' ? 'bg-[#0077cc] text-white shadow-xs' : 'bg-slate-800/80 text-slate-300 hover:bg-slate-700'
+            className={`px-3 py-1.5 rounded-md font-medium transition flex items-center gap-1.5 cursor-pointer ${
+              activeTab === 'security_desk' ? 'bg-[#0077cc] text-white shadow-xs' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
             }`}
           >
             <Key size={13} />
-            Security Guard Desk
+            Security Desk
           </button>
 
           <button
             onClick={() => setActiveTab('admin')}
-            className={`px-3 py-1.5 rounded-md font-medium transition flex items-center gap-1.5 ${
-              activeTab === 'admin' ? 'bg-[#0077cc] text-white shadow-xs' : 'bg-slate-800/80 text-slate-300 hover:bg-slate-700'
+            className={`px-3 py-1.5 rounded-md font-medium transition flex items-center gap-1.5 cursor-pointer ${
+              activeTab === 'admin' ? 'bg-[#0077cc] text-white shadow-xs' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
             }`}
           >
             <ShieldCheck size={13} />
@@ -409,51 +381,56 @@ export default function App() {
 
           <button
             onClick={() => setActiveTab('architecture')}
-            className={`px-3 py-1.5 rounded-md font-medium transition flex items-center gap-1.5 ${
-              activeTab === 'architecture' ? 'bg-amber-600 text-white shadow-xs' : 'bg-slate-800/80 text-amber-300 hover:bg-slate-700'
+            className={`px-3 py-1.5 rounded-md font-medium transition flex items-center gap-1.5 cursor-pointer ${
+              activeTab === 'architecture' ? 'bg-amber-600 text-white shadow-xs' : 'bg-slate-800 text-amber-300 hover:bg-slate-700'
             }`}
           >
             <Code2 size={13} />
-            PHP Code & Architecture
+            Architecture & Docs
           </button>
 
           <button
             onClick={handleResetDemo}
-            title="Reset to sample records for demo"
-            className="p-1.5 rounded bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 transition ml-1"
+            title="Reset data"
+            className="p-1.5 rounded bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 transition ml-1 cursor-pointer"
           >
             <RefreshCw size={13} className={isLoading ? 'animate-spin' : ''} />
           </button>
         </div>
       </nav>
 
-      {/* Main Header with Official IIT Bombay Crest */}
-      <header className="bg-white border-b-2 border-[#0077cc] py-4 px-4 text-center shadow-xs">
+      {/* Main Header - ETD-2026 Library Branding with ideathon_logo.png */}
+      <header className="bg-white border-b-2 border-[#0077cc] py-5 px-4 text-center shadow-xs">
         <div className="max-w-4xl mx-auto flex flex-col items-center justify-center">
-          <img 
-            src="/iitb_logo.png" 
-            alt="IIT Bombay Logo" 
-            className="h-20 object-contain mb-1.5"
-            onError={(e) => {
-              (e.target as HTMLElement).style.display = 'none';
-            }} 
-          />
-          <h1 className="text-xl md:text-2xl font-bold tracking-tight text-[#002855] uppercase my-0.5">
-            Indian Institute of Technology Bombay
+          <div className="flex items-center justify-center mb-2">
+            <img 
+              src="/ideathon_logo.png" 
+              alt="ETD-2026 Logo" 
+              className="h-20 md:h-24 object-contain drop-shadow-sm"
+              onError={(e) => {
+                (e.target as HTMLElement).style.display = 'none';
+              }} 
+            />
+          </div>
+          <div className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider bg-sky-50 text-sky-800 border border-sky-200 mb-1.5">
+            <span>Library of ETD-2026</span>
+          </div>
+          <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-[#0b1c34] uppercase">
+            ETD-2026
           </h1>
-          <h2 className="text-sm md:text-base font-semibold text-[#0077cc] my-0.5">
+          <h2 className="text-base md:text-lg font-semibold text-[#0077cc] mt-0.5">
             Central Library
           </h2>
-          <h3 className="text-xs md:text-sm font-medium text-slate-600 my-0.5">
+          <h3 className="text-xs md:text-sm font-medium text-slate-600 mt-0.5">
             Discussion Room Booking System (DRBS)
           </h3>
         </div>
       </header>
 
-      {/* TAB 1: PUBLIC ROOM RESERVATION MATRIX */}
+      {/* TAB 1: ROOM RESERVATION MATRIX */}
       {activeTab === 'booking' && (
         <main className="flex-1 max-w-6xl w-full mx-auto p-4 md:p-6">
-          {/* Attention Guidelines Modal (Mandatory as in index.php) */}
+          {/* Attention Guidelines Modal */}
           {showGuidelines && (
             <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
               <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full p-6 border-t-4 border-[#0077cc] animate-in fade-in zoom-in-95 duration-200">
@@ -463,10 +440,10 @@ export default function App() {
                 </div>
                 <div className="space-y-2.5 text-slate-700 text-sm leading-relaxed border-y border-slate-100 py-3">
                   <p><strong>Discussion Rooms are available by pre-booking only.</strong></p>
-                  <p>To book a room and collect the key, please submit your Institute ID card to the security personnel at the counter.</p>
-                  <p>Each IITB group can use a Discussion Room for up to two hours.</p>
+                  <p>To book a room and collect the key, please submit your Delegate / Institutional ID card to the security personnel at the counter.</p>
+                  <p>Each registered ETD-2026 group can use a Discussion Room for up to two hours.</p>
                   <p>Please maintain cleanliness in the room and handle all electronic equipment with care.</p>
-                  <p className="text-red-600 font-semibold">This facility is exclusively for registered IITB students and faculty.</p>
+                  <p className="text-sky-700 font-semibold">This facility is exclusively for registered participants and members of ETD-2026.</p>
                 </div>
 
                 <div className="mt-4 pt-2 text-center">
@@ -497,12 +474,12 @@ export default function App() {
             </div>
           )}
 
-          {/* Quick Notice Banner & Guidelines Re-open button */}
+          {/* Quick Notice Banner */}
           <div className="flex flex-wrap items-center justify-between gap-2 bg-sky-50 border border-sky-200 text-sky-900 px-4 py-3 rounded-lg mb-6 text-xs md:text-sm shadow-2xs">
             <div className="flex items-center gap-2">
               <Info size={18} className="text-[#0077cc] shrink-0" />
               <span>
-                <strong>Discussion Rooms 1, 2, and 3</strong> are operating 24/7 in 2-hour slots. Max 2 slots per day per student.
+                <strong>Discussion Rooms DR-1, DR-2, and DR-3</strong> are operating in 2-hour blocks. Max 2 slots per day per applicant.
               </span>
             </div>
             <button
@@ -510,13 +487,13 @@ export default function App() {
                 setAcceptedGuidelines(false);
                 setShowGuidelines(true);
               }}
-              className="text-[#0077cc] underline font-semibold hover:text-[#005fa3] ml-auto shrink-0"
+              className="text-[#0077cc] underline font-semibold hover:text-[#005fa3] ml-auto shrink-0 cursor-pointer"
             >
-              Review Rules & Guidelines
+              Review Guidelines
             </button>
           </div>
 
-          {/* Room Specs & Facilities Bar */}
+          {/* Room Specs & Facilities */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
             {ROOMS.map((rm) => (
               <div key={rm} className="bg-white p-3.5 rounded-lg border border-slate-200 shadow-2xs">
@@ -630,32 +607,10 @@ export default function App() {
               </table>
             </div>
           </div>
-
-          {/* Quick Helper Links */}
-          <div className="flex flex-wrap items-center justify-between text-xs text-slate-500 border-t pt-4">
-            <div>
-              Already booked a slot?{' '}
-              <button
-                onClick={() => setActiveTab('my_bookings')}
-                className="text-[#0077cc] font-semibold underline hover:text-[#005fa3]"
-              >
-                Find & Print Your Pass
-              </button>
-            </div>
-            <div>
-              Library Desk Officer?{' '}
-              <button
-                onClick={() => setActiveTab('security_desk')}
-                className="text-[#0077cc] font-semibold underline hover:text-[#005fa3]"
-              >
-                Open Security Key Registry
-              </button>
-            </div>
-          </div>
         </main>
       )}
 
-      {/* MODAL: BOOKING FORM (Active when slot chosen) */}
+      {/* MODAL: BOOKING FORM */}
       {bookingSlot && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 border-t-4 border-[#0077cc] animate-in fade-in zoom-in-95 duration-200 my-8">
@@ -697,7 +652,7 @@ export default function App() {
                     <input
                       type="text"
                       required
-                      placeholder="e.g. Siddharth Joshi"
+                      placeholder="e.g. Dr. Alex Morgan"
                       value={formData.name}
                       onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                       className="w-full p-2 border border-slate-300 rounded text-xs focus:ring-2 focus:ring-[#0077cc] focus:outline-none"
@@ -706,29 +661,29 @@ export default function App() {
 
                   <div>
                     <label className="block font-semibold text-slate-700 text-xs mb-1">
-                      Institute Email (<span className="text-red-600 font-bold">@iitb.ac.in strictly required</span>):
+                      Email Address:
                     </label>
                     <input
                       type="email"
                       required
-                      placeholder="siddharth.j@iitb.ac.in"
+                      placeholder="alex.morgan@etd2026.org"
                       value={formData.email}
                       onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                       className="w-full p-2 border border-slate-300 rounded text-xs focus:ring-2 focus:ring-[#0077cc] focus:outline-none"
                     />
                     <span className="text-[10px] text-slate-500 mt-0.5 block">
-                      Enforced by DRBS: Non-IITB domains are blocked.
+                      Confirmation pass will be linked to this email.
                     </span>
                   </div>
 
                   <div>
                     <label className="block font-semibold text-slate-700 text-xs mb-1">
-                      Roll Number / Employee ID:
+                      Delegate ID / Roll Number:
                     </label>
                     <input
                       type="text"
                       required
-                      placeholder="e.g. 23B0912 or EMP448"
+                      placeholder="e.g. ETD-DEL-402"
                       value={formData.roll_number}
                       onChange={(e) => setFormData({ ...formData, roll_number: e.target.value })}
                       className="w-full p-2 border border-slate-300 rounded text-xs focus:ring-2 focus:ring-[#0077cc] focus:outline-none"
@@ -753,7 +708,7 @@ export default function App() {
                       <option value="PG">Postgraduate (PG)</option>
                       <option value="PhD">Doctoral (PhD)</option>
                       <option value="PDF">Post-Doctoral Fellow (PDF)</option>
-                      <option value="Faculty">Faculty Member</option>
+                      <option value="Faculty">Faculty / Delegate</option>
                     </select>
                   </div>
 
@@ -767,7 +722,7 @@ export default function App() {
                     <button
                       type="button"
                       onClick={() => setBookingSlot(null)}
-                      className="bg-slate-100 hover:bg-slate-200 text-slate-700 py-2.5 px-4 rounded font-medium text-xs transition"
+                      className="bg-slate-100 hover:bg-slate-200 text-slate-700 py-2.5 px-4 rounded font-medium text-xs transition cursor-pointer"
                     >
                       Cancel
                     </button>
@@ -781,16 +736,16 @@ export default function App() {
                   <CheckCircle2 size={28} />
                 </div>
                 <h3 className="text-lg font-bold text-slate-900">Booking Confirmed!</h3>
-                <p className="text-xs text-slate-500 mb-4">Your Discussion Room Digital Pass is ready.</p>
+                <p className="text-xs text-slate-500 mb-4">Your ETD-2026 Discussion Room Pass is ready.</p>
 
                 {/* Printable Ticket Card */}
                 <div className="bg-slate-50 border-2 border-dashed border-[#0077cc] p-4 rounded-xl text-left text-xs mb-4">
                   <div className="flex items-center justify-between border-b pb-2 mb-2">
                     <div>
                       <span className="text-[10px] text-slate-500 uppercase tracking-wider block">Pass Reference</span>
-                      <strong className="text-sm font-mono text-[#002855]">IITB-DRBS-#{confirmedPass.id}</strong>
+                      <strong className="text-sm font-mono text-[#002855]">ETD-DRBS-#{confirmedPass.id}</strong>
                     </div>
-                    {/* Simulated Authentic SVG QR Code */}
+                    {/* Authentic SVG QR Code */}
                     <div className="p-1 bg-white border rounded">
                       <svg viewBox="0 0 40 40" className="w-12 h-12">
                         <rect width="40" height="40" fill="white" />
@@ -814,7 +769,7 @@ export default function App() {
                       <strong className="text-slate-800">{confirmedPass.name}</strong>
                     </div>
                     <div>
-                      <span className="text-slate-500 text-[10px] block">Roll No:</span>
+                      <span className="text-slate-500 text-[10px] block">Delegate ID:</span>
                       <strong className="text-slate-800 font-mono">{confirmedPass.roll_number}</strong>
                     </div>
                     <div>
@@ -835,8 +790,8 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="bg-amber-50 border border-amber-200 text-amber-900 p-2 rounded text-[10px] leading-tight mt-2">
-                    <strong>Important:</strong> Present this pass & deposit your physical IITB ID card with library security personnel to collect key.
+                  <div className="bg-sky-50 border border-sky-200 text-sky-900 p-2 rounded text-[10px] leading-tight mt-2">
+                    <strong>Important:</strong> Present this pass & deposit your physical ID card with ETD-2026 security personnel to collect key.
                   </div>
                 </div>
 
@@ -870,10 +825,10 @@ export default function App() {
           <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 mb-6">
             <h2 className="text-lg font-bold text-slate-800 mb-1 flex items-center gap-2">
               <QrCode size={20} className="text-[#0077cc]" />
-              Student Pass & Reservation Lookup
+              Delegate Pass & Reservation Lookup
             </h2>
             <p className="text-xs text-slate-500 mb-4">
-              Enter your Roll Number or IITB Email to retrieve your passes and check-in statuses.
+              Enter your Delegate ID or Email to retrieve your passes and check-in statuses.
             </p>
 
             <form onSubmit={handleSearchStudent} className="flex gap-2">
@@ -881,7 +836,7 @@ export default function App() {
                 <Search size={16} className="absolute left-3 top-2.5 text-slate-400" />
                 <input
                   type="text"
-                  placeholder="e.g. 210050012 or student@iitb.ac.in"
+                  placeholder="e.g. ETD-DEL-102 or delegate@etd2026.org"
                   value={searchRollOrEmail}
                   onChange={(e) => setSearchRollOrEmail(e.target.value)}
                   className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-[#0077cc] focus:outline-none"
@@ -896,7 +851,6 @@ export default function App() {
             </form>
           </div>
 
-          {/* Results */}
           {searchedStudentBookings !== null && (
             <div className="space-y-4">
               <div className="flex items-center justify-between text-xs font-semibold text-slate-600 px-1">
@@ -904,7 +858,7 @@ export default function App() {
                 {searchedStudentBookings.length > 0 && (
                   <button
                     onClick={() => setSearchedStudentBookings(null)}
-                    className="text-[#0077cc] underline"
+                    className="text-[#0077cc] underline cursor-pointer"
                   >
                     Clear Search
                   </button>
@@ -921,7 +875,7 @@ export default function App() {
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">
                         <span className="font-bold text-sm text-[#002855]">{b.room}</span>
-                        <span className="text-[11px] font-mono text-slate-500">Pass #IITB-{b.id}</span>
+                        <span className="text-[11px] font-mono text-slate-500">Pass #ETD-{b.id}</span>
                         <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${
                           b.key_status === 'key_issued' 
                             ? 'bg-emerald-100 text-emerald-800' 
@@ -957,25 +911,24 @@ export default function App() {
         </main>
       )}
 
-      {/* TAB 3: SECURITY GUARD DESK (Key issuance & return tracker) */}
+      {/* TAB 3: SECURITY GUARD DESK */}
       {activeTab === 'security_desk' && (
         <main className="flex-1 max-w-5xl w-full mx-auto p-4 md:p-6">
           <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 mb-6">
             <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
               <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
                 <Key size={20} className="text-amber-600" />
-                Library Security Desk • Physical Key & ID Registry
+                ETD-2026 Security Desk • Physical Key & ID Registry
               </h2>
               <span className="text-xs bg-slate-100 text-slate-600 font-mono px-2 py-1 rounded">
                 Today: {getTodayStr()}
               </span>
             </div>
             <p className="text-xs text-slate-500">
-              Per IITB library protocol, students must deposit their physical ID card at the security counter to receive the Discussion Room key. Security guards mark issuance and return below.
+              Per ETD-2026 library guidelines, delegates submit their physical ID card at the security desk to collect the room key.
             </p>
           </div>
 
-          {/* Table for Today's Active Reservations */}
           <div className="bg-white rounded-lg shadow-md border border-slate-200 overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full border-collapse text-center text-xs">
@@ -984,8 +937,8 @@ export default function App() {
                     <th className="p-3 border border-slate-700">Ref #</th>
                     <th className="p-3 border border-slate-700">Room</th>
                     <th className="p-3 border border-slate-700">Time Slot</th>
-                    <th className="p-3 border border-slate-700">Student Name</th>
-                    <th className="p-3 border border-slate-700">Roll No</th>
+                    <th className="p-3 border border-slate-700">Delegate Name</th>
+                    <th className="p-3 border border-slate-700">ID / Roll No</th>
                     <th className="p-3 border border-slate-700">Key Status</th>
                     <th className="p-3 border border-slate-700">Security Actions</th>
                   </tr>
@@ -1052,13 +1005,12 @@ export default function App() {
       {activeTab === 'admin' && (
         <main className="flex-1 max-w-6xl w-full mx-auto p-4 md:p-6">
           {!isAdminLoggedIn ? (
-            /* Admin Login Card */
             <div className="max-w-sm mx-auto my-12 bg-white p-6 rounded-xl shadow-md border border-slate-200 text-center">
               <div className="w-12 h-12 bg-sky-100 text-[#0077cc] rounded-full flex items-center justify-center mx-auto mb-3">
                 <ShieldCheck size={26} />
               </div>
               <h2 className="text-xl font-bold text-slate-800 mb-1">Admin Login</h2>
-              <p className="text-xs text-slate-500 mb-4">Central Library Staff Management</p>
+              <p className="text-xs text-slate-500 mb-4">ETD-2026 Central Library Console</p>
 
               {adminLoginError && (
                 <div className="p-2.5 bg-red-50 border border-red-200 text-red-700 rounded text-xs font-semibold mb-4">
@@ -1104,34 +1056,33 @@ export default function App() {
               </div>
             </div>
           ) : (
-            /* Admin Console & Metrics */
             <div className="space-y-6">
               <div className="flex items-center justify-between">
                 <div>
                   <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
                     <BarChart3 className="text-[#0077cc]" size={22} />
-                    DRBS Administrative Management & Analytics
+                    ETD-2026 Administrative Management & Analytics
                   </h2>
-                  <p className="text-xs text-slate-500">Live metrics across all 3 IIT Bombay discussion rooms</p>
+                  <p className="text-xs text-slate-500">Live metrics across all 3 ETD-2026 discussion rooms</p>
                 </div>
                 <button
                   onClick={() => setIsAdminLoggedIn(false)}
-                  className="text-xs font-semibold text-red-600 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded transition flex items-center gap-1.5"
+                  className="text-xs font-semibold text-red-600 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded transition flex items-center gap-1.5 cursor-pointer"
                 >
                   <LogOut size={13} />
                   Logout
                 </button>
               </div>
 
-              {/* KPI Stat Cards */}
+              {/* KPI Cards */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
                   <span className="text-xs text-slate-500">Today's Bookings</span>
-                  <div className="text-2xl font-bold text-[#002855] mt-1">
+                  <div className="text-2xl font-bold text-[#0b1c34] mt-1">
                     {stats?.todayBookings ?? 0}
                   </div>
                   <span className="text-[10px] text-emerald-600 font-medium">
-                    Out of 36 max slots
+                    Out of 36 slots
                   </span>
                 </div>
 
@@ -1140,23 +1091,23 @@ export default function App() {
                   <div className="text-2xl font-bold text-[#0077cc] mt-1">
                     {stats?.totalBookings ?? bookings.length}
                   </div>
-                  <span className="text-[10px] text-slate-400">Saved on server database</span>
+                  <span className="text-[10px] text-slate-400">Synchronized on server</span>
                 </div>
 
                 <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
-                  <span className="text-xs text-slate-500">Active Discussion Rooms</span>
+                  <span className="text-xs text-slate-500">Active Rooms</span>
                   <div className="text-2xl font-bold text-slate-800 mt-1">3 Rooms</div>
                   <span className="text-[10px] text-slate-400">DR-1, DR-2, DR-3</span>
                 </div>
 
                 <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
-                  <span className="text-xs text-slate-500">Domain Verification</span>
-                  <div className="text-2xl font-bold text-emerald-600 mt-1">100%</div>
-                  <span className="text-[10px] text-emerald-700 font-medium">Strict @iitb.ac.in</span>
+                  <span className="text-xs text-slate-500">Key Collection Desk</span>
+                  <div className="text-2xl font-bold text-emerald-600 mt-1">Active</div>
+                  <span className="text-[10px] text-emerald-700 font-medium">Security Guard Log</span>
                 </div>
               </div>
 
-              {/* Search & Filter Bar */}
+              {/* Filters */}
               <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200">
                 <div className="flex flex-wrap items-center gap-3 text-xs">
                   <div className="flex items-center gap-1.5">
@@ -1200,14 +1151,14 @@ export default function App() {
                       setAdminFilterDate('');
                       setAdminFilterRoom('All');
                     }}
-                    className="ml-auto bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded font-medium transition"
+                    className="ml-auto bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded font-medium transition cursor-pointer"
                   >
                     Reset Filters
                   </button>
                 </div>
               </div>
 
-              {/* Admin Table */}
+              {/* Bookings Table */}
               <div className="bg-white rounded-lg shadow-md border border-slate-200 overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="w-full border-collapse text-center text-xs">
@@ -1216,7 +1167,7 @@ export default function App() {
                         <th className="p-2.5 border border-slate-300">ID</th>
                         <th className="p-2.5 border border-slate-300">Name</th>
                         <th className="p-2.5 border border-slate-300">Email</th>
-                        <th className="p-2.5 border border-slate-300">Roll No</th>
+                        <th className="p-2.5 border border-slate-300">ID No</th>
                         <th className="p-2.5 border border-slate-300">Category</th>
                         <th className="p-2.5 border border-slate-300">Date</th>
                         <th className="p-2.5 border border-slate-300">Slot</th>
@@ -1267,30 +1218,29 @@ export default function App() {
         </main>
       )}
 
-      {/* TAB 5: ARCHITECTURE & ORIGINAL PHP CODE VIEWER */}
+      {/* TAB 5: ARCHITECTURE & DOCS */}
       {activeTab === 'architecture' && (
         <main className="flex-1 max-w-6xl w-full mx-auto p-4 md:p-6 space-y-6">
           <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
             <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2 mb-2">
               <Code2 className="text-amber-500" size={24} />
-              Technical Architecture & Hackathon Presentation Guide
+              ETD-2026 Technical Architecture & Hackathon Presentation Guide
             </h2>
             <p className="text-sm text-slate-600 leading-relaxed">
-              This system transitions the original PHP/MySQL prototype into an enterprise-grade full-stack Node.js + Express + React architecture with atomic server persistence, live REST APIs, security desk key tracking, and digital e-passes.
+              Configured specifically for the <strong>Library of ETD-2026</strong>. Runs on a modern full-stack Node.js + Express + React architecture with atomic server persistence, live REST APIs, security desk key tracking, and digital e-passes.
             </p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Architecture Card */}
             <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-2xs space-y-3">
               <h3 className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
                 <Building2 size={16} className="text-[#0077cc]" />
-                Full-Stack System Components
+                ETD-2026 System Components
               </h3>
               <ul className="text-xs text-slate-600 space-y-2">
                 <li className="flex items-start gap-2">
                   <Check className="text-emerald-500 shrink-0 mt-0.5" size={14} />
-                  <span><strong>Express REST Backend (<code>server.ts</code>):</strong> Handles REST endpoints, validation rules, collision locking, and security logging.</span>
+                  <span><strong>Express REST Backend (<code>server.ts</code>):</strong> REST endpoints, validation rules, collision locking, and security logging.</span>
                 </li>
                 <li className="flex items-start gap-2">
                   <Check className="text-emerald-500 shrink-0 mt-0.5" size={14} />
@@ -1298,7 +1248,7 @@ export default function App() {
                 </li>
                 <li className="flex items-start gap-2">
                   <Check className="text-emerald-500 shrink-0 mt-0.5" size={14} />
-                  <span><strong>Security Protocol Integration:</strong> Physical ID deposit and key check-in workflow required by IITB Central Library regulations.</span>
+                  <span><strong>Security Protocol Integration:</strong> Physical ID deposit and key check-in workflow required by ETD-2026 Library regulations.</span>
                 </li>
                 <li className="flex items-start gap-2">
                   <Check className="text-emerald-500 shrink-0 mt-0.5" size={14} />
@@ -1307,7 +1257,6 @@ export default function App() {
               </ul>
             </div>
 
-            {/* PHP Inspector Selector */}
             <div className="bg-slate-900 text-white p-5 rounded-xl border border-slate-800 space-y-3">
               <div className="flex items-center justify-between">
                 <h3 className="font-bold text-amber-400 text-sm flex items-center gap-1.5">
@@ -1339,8 +1288,8 @@ export default function App() {
       )}
 
       {/* Footer */}
-      <footer className="bg-white border-t border-slate-200 py-3 text-center text-xs text-slate-500 mt-auto">
-        Indian Institute of Technology Bombay • Central Library Discussion Room Booking System (DRBS)
+      <footer className="bg-white border-t border-slate-200 py-3.5 text-center text-xs text-slate-500 mt-auto">
+        Library of ETD-2026 • Discussion Room Booking System (DRBS)
       </footer>
     </div>
   );
